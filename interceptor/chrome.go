@@ -47,30 +47,23 @@ func StartChromeAndCapture(ssDomain string) (string, error) {
 		return "", fmt.Errorf("failed to navigate: %v", err)
 	}
 
-	for {
-		select {
-		case <-ctx.Done():
-			log.Println("Context has ended. Stopping Chrome.")
-			return logFile, nil
-		default:
-			var id network.RequestID
-			done := make(chan bool)
-			chromedp.ListenTarget(ctx, func(ev interface{}) {
-				switch ev := ev.(type) {
-				case *network.EventRequestWillBeSent:
-					id = ev.RequestID
-					go logRequest(ctx, file, ev)
-				case *network.EventResponseReceived:
-					if id != "" && ev.RequestID == id {
-						id = ""
-						go logResponse(ctx, file, ev.RequestID)
-					}
-				}
-				done <- true
-			})
-			<-done
+	chromedp.ListenTarget(ctx, func(ev interface{}) {
+		switch ev := ev.(type) {
+		case *network.EventRequestWillBeSent:
+			go logRequest(ctx, file, ev)
+		case *network.EventResponseReceived:
+			go logResponse(ctx, file, ev.RequestID)
 		}
+	})
+
+	select {
+	case <-ctx.Done():
+		log.Println("Context has ended. Stopping Chrome.")
+	case <-time.After(24 * time.Hour):
+		log.Println("Timeout reached. Stopping Chrome.")
 	}
+
+	return logFile, nil
 }
 
 func logRequest(_ context.Context, file io.Writer, event *network.EventRequestWillBeSent) {
