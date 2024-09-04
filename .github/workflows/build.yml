@@ -1,0 +1,77 @@
+name: Build goss-interceptor
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build goss-interceptor
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Go 1.23
+      uses: actions/setup-go@v4
+      with:
+        go-version: 1.23
+
+    - name: Run make all
+      run: make all
+
+    - name: List build files
+      id: list_files
+      run: |
+        find build -type f > files.txt
+        cat files.txt
+
+    - name: Upload binaries to release
+      run: |
+        while IFS= read -r file; do
+          if [ -f "$file" ]; then
+            # Determine the platform and file name
+            case "$file" in
+              *"/windows-amd64/"*)
+                platform="windows-amd64"
+                asset_name="goss-interceptor-${platform}.exe"
+                ;;
+              *"/windows-arm64/"*)
+                platform="windows-arm64"
+                asset_name="goss-interceptor-${platform}.exe"
+                ;;
+              *"/linux-amd64/"*)
+                platform="linux-amd64"
+                asset_name="goss-interceptor-${platform}"
+                ;;
+              *"/linux-arm64/"*)
+                platform="linux-arm64"
+                asset_name="goss-interceptor-${platform}"
+                ;;
+              *"/macos-amd64/"*)
+                platform="macos-amd64"
+                asset_name="goss-interceptor-${platform}"
+                ;;
+              *"/macos-arm64/"*)
+                platform="macos-arm64"
+                asset_name="goss-interceptor-${platform}"
+                ;;
+              *)
+                platform="unknown"
+                asset_name="unknown"
+                ;;
+            esac
+
+            echo "Uploading $file as $asset_name..."
+            curl -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                 -H "Content-Type: $(file -b --mime-type "$file")" \
+                 --data-binary @"$file" \
+                 "https://uploads.github.com/repos/${{ github.repository }}/releases/${{ github.event.release.id }}/assets?name=${asset_name}"
+          else
+            echo "$file does not exist"
+          fi
+        done < files.txt
