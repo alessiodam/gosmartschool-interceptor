@@ -6,18 +6,19 @@ import (
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
 	"github.com/google/uuid"
+	"io"
 	"log"
 	"os"
 	"strings"
 	"time"
 )
 
-func StartChromeAndCapture(smartschoolDomain string) error {
+func StartChromeAndCapture(ssDomain string) (string, error) {
 	logFile := fmt.Sprintf("./gsscap-requests/%s.gsscap", uuid.New().String())
 
-	file, err := os.Create(logFile)
+	file, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
-		return fmt.Errorf("failed to create log file: %v", err)
+		return "", fmt.Errorf("failed to create log file: %v", err)
 	}
 	defer func() {
 		if err := file.Close(); err != nil {
@@ -41,52 +42,45 @@ func StartChromeAndCapture(smartschoolDomain string) error {
 	if err := chromedp.Run(
 		ctx,
 		network.Enable(),
-		chromedp.Navigate("https://"+smartschoolDomain),
+		chromedp.Navigate("https://"+ssDomain),
 	); err != nil {
-		return fmt.Errorf("failed to navigate: %v", err)
+		return "", fmt.Errorf("failed to navigate: %v", err)
 	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			log.Println("Context has ended. Stopping Chrome.")
-			return nil
+			return logFile, nil
 		default:
 			var id network.RequestID
 			done := make(chan bool)
 			chromedp.ListenTarget(ctx, func(ev interface{}) {
 				switch ev := ev.(type) {
 				case *network.EventRequestWillBeSent:
+					id = ev.RequestID
 					go logRequest(ctx, file, ev)
 				case *network.EventResponseReceived:
-					id = ev.RequestID
-				case *network.EventLoadingFinished:
 					if id != "" && ev.RequestID == id {
-						go func() {
-							defer func() {
-								done <- true
-							}()
-
-							if err := chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
-								var err error
-								return err
-							})); err != nil {
-								log.Printf("Error getting response body: %v", err)
-								return
-							}
-
-							logResponse(ctx, file, ev.RequestID)
-						}()
+						id = ""
+						go logResponse(ctx, file, ev.RequestID)
 					}
 				}
+				done <- true
 			})
 			<-done
 		}
 	}
 }
-func logRequest(_ context.Context, file *os.File, event *network.EventRequestWillBeSent) {
+
+func logRequest(_ context.Context, file io.Writer, event *network.EventRequestWillBeSent) {
 	timestamp := time.Now().Format(time.RFC3339)
 	req := event.Request
+
+	if !strings.Contains(req.URL, "smartschool.") {
+		log.Printf("Skipping request. URL does not match domain: %s", req.URL)
+		return
+	}
 
 	postData := ""
 	if req.HasPostData && len(req.PostDataEntries) > 0 {
@@ -101,12 +95,12 @@ func logRequest(_ context.Context, file *os.File, event *network.EventRequestWil
 	logEntry += fmt.Sprintf("URL: %s\nMethod: %s\nHeaders: %v\nPostData: %s\nReferrer Policy: %s\nRequest ID: %s\n\n",
 		req.URL, req.Method, req.Headers, postData, req.ReferrerPolicy, event.RequestID)
 
-	if _, err := file.WriteString(logEntry); err != nil {
+	if _, err := file.Write([]byte(logEntry)); err != nil {
 		log.Printf("Error logging request: %v", err)
 	}
 }
 
-func logResponse(ctx context.Context, file *os.File, id network.RequestID) {
+func logResponse(ctx context.Context, file io.Writer, id network.RequestID) {
 	timestamp := time.Now().Format(time.RFC3339)
 
 	var data []byte
@@ -123,7 +117,7 @@ func logResponse(ctx context.Context, file *os.File, id network.RequestID) {
 	logEntry += fmt.Sprintf("Body: %s\nRequest ID: %s\n\n",
 		string(data), id)
 
-	if _, err := file.WriteString(logEntry); err != nil {
+	if _, err := file.Write([]byte(logEntry)); err != nil {
 		log.Printf("Error logging response: %v", err)
 	}
 }
