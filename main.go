@@ -88,4 +88,7 @@ func displaySessionEndMessage(logFilePath string) {
 	fmt.Println("These log files contain everything you did on Smartschool during the session, including potentially sensitive information like emails, usernames, passwords, etc. Cookies are NOT logged.")
 	fmt.Println("If you wish, you can delete the sensitive info yourself before sending it while I'm working on an automatic solution.")
 	fmt.Println("Thanks in advance! Your help is very valuable!")
+
+	fmt.Print("Press enter to exit...")
+	fmt.Scanln()
 }
